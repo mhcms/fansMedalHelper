@@ -164,9 +164,15 @@ async def push_message(session, sendkey, message):
     await session.post(url, data=data)
     log.info("Server酱已推送")
 
+first_run = users.get("FIRST_RUN", False)
 
 if __name__ == "__main__":
     cron = users.get("CRON", None)
+
+    if first_run:
+         log.info("第一次运行，立即执行任务。")
+         run()
+         first_run = False
 
     if cron:
         from apscheduler.schedulers.blocking import BlockingScheduler
@@ -191,6 +197,4 @@ if __name__ == "__main__":
         )
         scheduler.start()
     else:
-        log.info("未配置定时器，开启单次任务。")
-        run()
-        log.info("任务结束")
+        log.info("未配置定时器，任务结束。")
