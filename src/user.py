@@ -237,21 +237,40 @@ class BiliUser:
             return
         HEART_MAX = self.config['WATCHINGLIVE']
         self.log.log("INFO", f"每日{HEART_MAX}分钟任务开始")
+        
+        # 计算到第二天0点的截止时间
+        now = datetime.now()
+        next_midnight = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
+        end_time = next_midnight.timestamp()
+        self.log.log("INFO", f"任务将在 {next_midnight.strftime('%Y-%m-%d %H:%M:%S')} 前结束")
+        
         n = 0
         for medal in self.medalsNeedDo:
             n += 1
             for heartNum in range(1, HEART_MAX+1):
-                if self.config['STOPWATCHINGTIME']:
-                    if int(time.time()) >= self.config['STOPWATCHINGTIME']:
-                        self.log.log("INFO", "已到设置的时间，自动停止直播任务")
-                        return
+                # 检查剩余时间是否足够完成下一次心跳包（预留90秒缓冲时间）
+                current_timestamp = time.time()
+                time_remaining = end_time - current_timestamp
+                
+                if time_remaining < 90:  # 如果剩余时间不足90秒，提前结束
+                    remaining_hours = int(time_remaining // 3600)
+                    remaining_minutes = int((time_remaining % 3600) // 60)
+                    remaining_seconds = int(time_remaining % 60)
+                    self.log.log("INFO", f"距离24点还有 {remaining_hours}时{remaining_minutes}分{remaining_seconds}秒，提前结束直播任务，等待新的一轮")
+                    return
+                
                 tasks = []
                 tasks.append(self.api.heartbeat(medal['room_info']['room_id'], medal['medal']['target_id']))
                 await asyncio.gather(*tasks)
                 if heartNum%5==0:
+                    # 计算剩余时间并显示
+                    current_timestamp = time.time()
+                    time_remaining = end_time - current_timestamp
+                    remaining_hours = int(time_remaining // 3600)
+                    remaining_minutes = int((time_remaining % 3600) // 60)
                     self.log.log(
                         "INFO",
-                        f"{medal['anchor_info']['nick_name']} 第{heartNum}次心跳包已发送（{n}/{len(self.medalsNeedDo)}）",
+                        f"{medal['anchor_info']['nick_name']} 第{heartNum}次心跳包已发送（{n}/{len(self.medalsNeedDo)}）- 距离24点还有{remaining_hours}时{remaining_minutes}分",
                     )
                 await asyncio.sleep(60)
         self.log.log("SUCCESS", f"每日{HEART_MAX}分钟任务完成")

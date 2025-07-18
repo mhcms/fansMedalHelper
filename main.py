@@ -67,19 +67,7 @@ try:
         "WEARMEDAL": users["WEARMEDAL"],
         "SIGNINGROUP": users.get("SIGNINGROUP", 2),
         "PROXY": users.get("PROXY"),
-        "STOPWATCHINGTIME": None,
     }
-    stoptime = users.get("STOPWATCHINGTIME", None)
-    if stoptime:
-        import time
-        now = int(time.time())
-        if isinstance(stoptime, int):
-            delay = now + int(stoptime)
-        else:
-            delay = int(time.mktime(time.strptime(f'{time.strftime("%Y-%m-%d", time.localtime(now))} {stoptime}', "%Y-%m-%d %H:%M:%S")))
-            delay = delay if delay > now else delay + 86400
-        config["STOPWATCHINGTIME"] = delay
-        log.info(f"本轮任务将在 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(config['STOPWATCHINGTIME']))} 结束")
 except Exception as e:
     log.error(f"读取配置文件失败,请检查配置文件格式是否正确: {e}")
     exit(1)
@@ -184,14 +172,15 @@ if __name__ == "__main__":
         schedulers.start()
     elif "--auto" in sys.argv:
         from apscheduler.schedulers.blocking import BlockingScheduler
-        from apscheduler.triggers.interval import IntervalTrigger
+        from apscheduler.triggers.cron import CronTrigger
         import datetime
 
-        log.info("使用自动守护模式，每隔 24 小时运行一次。")
+        log.info("使用自动守护模式，每天0点运行一次，确保在24点开启新的一轮。")
         scheduler = BlockingScheduler(timezone="Asia/Shanghai")
+        # 每天0点0分执行任务
         scheduler.add_job(
             run,
-            IntervalTrigger(hours=24),
+            CronTrigger(hour=0, minute=0),
             next_run_time=datetime.datetime.now(),
             misfire_grace_time=3600,
         )
