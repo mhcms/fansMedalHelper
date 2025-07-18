@@ -136,7 +136,7 @@ class BiliApi:
         async with self.session.post(*args, **kwargs) as resp:
             return self.__check_response(await resp.json())
 
-    async def getFansMedalandRoomID(self) -> dict:
+    async def getFansMedalandRoomID(self):
         """
         获取用户粉丝勋章和直播间ID
         """
@@ -175,13 +175,14 @@ class BiliApi:
             "click_time": 1,
             "roomid": room_id,
         }
-        self.headers.update(
+        headers = self.headers.copy()
+        headers.update(
             {
                 "Content-Type": "application/x-www-form-urlencoded",
             }
-        ),
+        )
         # for _ in range(3):
-        await self.__post(url, data=SingableDict(data).signed, headers=self.headers)
+        await self.__post(url, data=SingableDict(data).signed, headers=headers)
         # await asyncio.sleep(self.u.config['LIKE_CD'] if not self.u.config['ASYNC'] else 2)
 
     async def likeInteractV3(self, room_id: int, up_id: int, self_uid: int):
@@ -198,13 +199,14 @@ class BiliApi:
             "anchor_id": up_id,
             "uid": up_id,
         }
-        self.headers.update(
+        headers = self.headers.copy()
+        headers.update(
             {
                 "Content-Type": "application/x-www-form-urlencoded",
             }
-        ),
+        )
         # for _ in range(3):
-        await self.__post(url, data=SingableDict(data).signed, headers=self.headers)
+        await self.__post(url, data=SingableDict(data).signed, headers=headers)
 
     async def shareRoom(self, room_id: int):
         """
@@ -219,13 +221,14 @@ class BiliApi:
             "interact_type": 3,
             "roomid": room_id,
         }
-        self.headers.update(
+        headers = self.headers.copy()
+        headers.update(
             {
                 "Content-Type": "application/x-www-form-urlencoded",
             }
-        ),
+        )
         # for _ in range(5):
-        await self.__post(url, data=SingableDict(data).signed, headers=self.headers)
+        await self.__post(url, data=SingableDict(data).signed, headers=headers)
         # await asyncio.sleep(self.u.config['SHARE_CD'] if not self.u.config['ASYNC'] else 5)
 
     async def sendDanmaku(self, room_id: int) -> str:
@@ -233,7 +236,9 @@ class BiliApi:
         发送弹幕
         """
         url = "https://api.live.bilibili.com/xlive/app-room/v1/dM/sendmsg"
-        danmakus = [
+        
+        # 使用配置文件中的弹幕内容，如果没有配置则使用默认内容
+        default_danmakus = [
             "(⌒▽⌒).",
             "（￣▽￣）.",
             "(=・ω・=).",
@@ -250,6 +255,10 @@ class BiliApi:
             "⁄(⁄ ⁄•⁄ω⁄•⁄ ⁄)⁄.",
             "←◡←.",
         ]
+        danmakus = self.u.config.get("DANMAKU_TEXTS", default_danmakus)
+        if not danmakus or len(danmakus) == 0:  # 如果配置为空列表，使用默认内容
+            danmakus = default_danmakus
+            
         params = {
             "access_key": self.u.access_key,
             "actionKey": "appkey",
@@ -263,14 +272,15 @@ class BiliApi:
             "color": "16777215",
             "fontsize": "25",
         }
-        self.headers.update(
+        headers = self.headers.copy()
+        headers.update(
             {
                 "Content-Type": "application/x-www-form-urlencoded",
             }
-        ),
+        )
         try:
             resp = await self.__post(
-                url, params=SingableDict(params).signed, data=data, headers=self.headers
+                url, params=SingableDict(params).signed, data=data, headers=headers
             )
         except BiliApiError as e:
             if e.code == 0:
@@ -285,13 +295,14 @@ class BiliApi:
                         "msg": "111",
                     }
                 )
-                self.headers.update(
+                headers = self.headers.copy()
+                headers.update(
                     {
                         "Content-Type": "application/x-www-form-urlencoded",
                     }
-                ),
+                )
                 resp = await self.__post(
-                    url, params=SingableDict(params).signed, data=data, headers=self.headers
+                    url, params=SingableDict(params).signed, data=data, headers=headers
                 )
                 # print(resp["mode_info"]["extra"])
                 return json.loads(resp["mode_info"]["extra"])["content"]
@@ -373,6 +384,10 @@ class BiliApi:
         today_timestamp = int(time.mktime(time.strptime(f"{time.strftime('%Y-%m-%d', time.localtime(time.time()))} 00:00:00", "%Y-%m-%d %H:%M:%S")))
         now_timestamp = int(time.time())
         timestamp = now_timestamp - 60 if now_timestamp - 60 > today_timestamp else today_timestamp
+        
+        # 计算up_session的时间差，使用更合理的时间差
+        session_start_time = now_timestamp - min(3600, now_timestamp - timestamp)  # 最多1小时，最少实际观看时间
+        
         data = {
             "platform": "android",
             "uuid": self.u.uuids[0],
@@ -393,7 +408,7 @@ class BiliApi:
             "s_time": "0",
             "data_behavior_id": "",
             "data_source_id": "",
-            "up_session": f"l:one:live:record:{room_id}:{int(time.time())-88888}",
+            "up_session": f"l:one:live:record:{room_id}:{session_start_time}",
             "visit_id": randomString(32).lower(),
             "watch_status": "%7B%22pk_id%22%3A0%2C%22screen_status%22%3A1%7D",
             "click_id": self.u.uuids[1],
@@ -401,21 +416,29 @@ class BiliApi:
             "player_type": "0",
             "client_ts": f"{now_timestamp}",
         }
+        
+        # 先计算client_sign，然后再添加其他参数
+        client_signature = client_sign(data)
+        
         data.update(
             {
-                "client_sign": client_sign(data),
+                "client_sign": client_signature,
                 "access_key": self.u.access_key,
                 "actionKey": "appkey",
                 "appkey": Crypto.APPKEY,
-                "ts": int(time.time()),
+                "ts": now_timestamp,  # 使用同一个时间戳保持一致性
             }
         )
-        self.headers.update(
+        
+        # 正确设置headers
+        headers = self.headers.copy()
+        headers.update(
             {
                 "Content-Type": "application/x-www-form-urlencoded",
             }
-        ),
-        return await self.__post(url, data=SingableDict(data).signed, headers=self.headers)
+        )
+        
+        return await self.__post(url, data=SingableDict(data).signed, headers=headers)
 
     async def wearMedal(self, medal_id: int):
         """
@@ -432,12 +455,13 @@ class BiliApi:
             "type": "1",
             "version": "0",
         }
-        self.headers.update(
+        headers = self.headers.copy()
+        headers.update(
             {
                 "Content-Type": "application/x-www-form-urlencoded",
             }
-        ),
-        return await self.__post(url, data=SingableDict(data).signed, headers=self.headers)
+        )
+        return await self.__post(url, data=SingableDict(data).signed, headers=headers)
 
     async def getGroups(self):
         url = "https://api.vc.bilibili.com/link_group/v1/member/my_groups?build=0&mobi_app=web"
@@ -472,4 +496,10 @@ class BiliApi:
             "appkey": Crypto.APPKEY,
             "ts": int(time.time()),
         }
-        return await self.__post(url, data=SingableDict(data).signed, headers=self.headers)
+        headers = self.headers.copy()
+        headers.update(
+            {
+                "Content-Type": "application/x-www-form-urlencoded",
+            }
+        )
+        return await self.__post(url, data=SingableDict(data).signed, headers=headers)

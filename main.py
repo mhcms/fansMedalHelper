@@ -63,9 +63,10 @@ try:
         "DANMAKU_NUM": users["DANMAKU_NUM"],
         "DANMAKU_CHECK_LIGHT": users["DANMAKU_CHECK_LIGHT"],
         "DANMAKU_CHECK_LEVEL": users["DANMAKU_CHECK_LEVEL"],
+        "DANMAKU_TEXTS": users.get("DANMAKU_TEXTS", []),  # 读取自定义弹幕内容
         "WATCHINGLIVE": users["WATCHINGLIVE"],
         "WEARMEDAL": users["WEARMEDAL"],
-        "SIGNINGROUP": users.get("SIGNINGROUP", 2),
+        "SIGNINGROUP": users.get("SIGNINGROUP", 2),  # 修改默认值为2，与配置文件一致
         "PROXY": users.get("PROXY"),
     }
 except Exception as e:
@@ -139,6 +140,54 @@ async def main():
         log.info(f"{notifier} 已推送")
 
 
+def should_run_immediately(cron_expression):
+    """
+    判断是否应该立即执行任务
+    如果当前时间已经错过了今天的定时执行时间，返回True
+    """
+    if not cron_expression:
+        return False
+    
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+        import datetime
+        
+        # 创建cron触发器
+        trigger = CronTrigger.from_crontab(cron_expression, timezone="Asia/Shanghai")
+        
+        # 获取当前时间
+        now = datetime.datetime.now(tz=trigger.timezone)
+        
+        # 获取今天0点
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # 获取今天应该执行的时间
+        today_run_time = None
+        check_time = today_start
+        
+        # 在今天这一天内查找应该执行的时间
+        while check_time.date() == today_start.date():
+            next_fire = trigger.get_next_fire_time(None, check_time)
+            if next_fire and next_fire.date() == today_start.date():
+                today_run_time = next_fire
+                break
+            else:
+                break
+        
+        # 如果找到了今天的执行时间，并且当前时间已经超过了执行时间
+        if today_run_time and now > today_run_time:
+            # 检查是否超过了30分钟（避免频繁重复执行）
+            time_diff = (now - today_run_time).total_seconds() / 60  # 转换为分钟
+            if time_diff <= 12 * 60:  # 12小时内都认为是错过了，可以补执行
+                log.info(f"今天的执行时间是 {today_run_time.strftime('%H:%M:%S')}，当前时间 {now.strftime('%H:%M:%S')}，错过了 {time_diff:.1f} 分钟")
+                return True
+                
+    except Exception as e:
+        log.warning(f"检查定时执行时间失败: {e}")
+    
+    return False
+
+
 def run(*args, **kwargs):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -152,22 +201,50 @@ async def push_message(session, sendkey, message):
     await session.post(url, data=data)
     log.info("Server酱已推送")
 
-first_run = users.get("FIRST_RUN", False)
 
 if __name__ == "__main__":
     cron = users.get("CRON", None)
+    smart_start = users.get("SMART_START", True)
 
-    if first_run:
-         log.info("第一次运行，立即执行任务。")
-         run()
-         first_run = False
+    # 智能启动逻辑
+    should_run_now = False
+    
+    if smart_start == "always":
+        log.info("配置为每次启动都执行，立即执行任务。")
+        should_run_now = True
+    elif smart_start and cron:
+        if should_run_immediately(cron):
+            log.info("检测到已错过今天的定时执行时间，智能启动：立即执行任务。")
+            should_run_now = True
+        else:
+            from apscheduler.triggers.cron import CronTrigger
+            import datetime
+            
+            trigger = CronTrigger.from_crontab(cron, timezone="Asia/Shanghai")
+            now = datetime.datetime.now(tz=trigger.timezone)
+            next_run = trigger.get_next_fire_time(None, now)
+            if next_run:
+                log.info(f"智能启动检测：今天的定时执行时间尚未到达，下次执行时间：{next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+            else:
+                log.info("智能启动检测：等待定时器执行。")
+    elif smart_start:
+        log.info("智能启动模式开启，但未配置CRON，立即执行任务。")
+        should_run_now = True
+    elif cron:
+        log.info("智能启动模式关闭，严格按照定时器执行。")
+    else:
+        log.info("未配置CRON且智能启动关闭，单次执行模式。")
+        should_run_now = True
+
+    if should_run_now:
+        run()
 
     if cron:
         from apscheduler.schedulers.blocking import BlockingScheduler
         from apscheduler.triggers.cron import CronTrigger
 
-        log.info(f"使用内置定时器 {cron}，开启定时任务，等待时间到达后执行。")
-        schedulers = BlockingScheduler()
+        log.info(f"启动内置定时器 [{cron}]，进入守护模式...")
+        schedulers = BlockingScheduler(timezone="Asia/Shanghai")
         schedulers.add_job(run, CronTrigger.from_crontab(cron), misfire_grace_time=3600)
         schedulers.start()
     elif "--auto" in sys.argv:
@@ -175,9 +252,8 @@ if __name__ == "__main__":
         from apscheduler.triggers.cron import CronTrigger
         import datetime
 
-        log.info("使用自动守护模式，每天0点运行一次，确保在24点开启新的一轮。")
+        log.info("使用自动守护模式，每天0点运行一次。")
         scheduler = BlockingScheduler(timezone="Asia/Shanghai")
-        # 每天0点0分执行任务
         scheduler.add_job(
             run,
             CronTrigger(hour=0, minute=0),
@@ -186,4 +262,7 @@ if __name__ == "__main__":
         )
         scheduler.start()
     else:
-        log.info("未配置定时器，任务结束。")
+        if not should_run_now:
+            log.info("单次执行完成，程序结束。")
+        else:
+            log.info("任务执行完成，程序结束。")
