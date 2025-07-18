@@ -161,26 +161,26 @@ def should_run_immediately(cron_expression):
         # 获取今天0点
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
-        # 获取今天应该执行的时间
-        today_run_time = None
-        check_time = today_start
+        # 获取今天的执行时间
+        today_run_time = trigger.get_next_fire_time(None, today_start)
         
-        # 在今天这一天内查找应该执行的时间
-        while check_time.date() == today_start.date():
-            next_fire = trigger.get_next_fire_time(None, check_time)
-            if next_fire and next_fire.date() == today_start.date():
-                today_run_time = next_fire
-                break
-            else:
-                break
-        
-        # 如果找到了今天的执行时间，并且当前时间已经超过了执行时间
-        if today_run_time and now > today_run_time:
-            # 检查是否超过了30分钟（避免频繁重复执行）
-            time_diff = (now - today_run_time).total_seconds() / 60  # 转换为分钟
-            if time_diff <= 12 * 60:  # 12小时内都认为是错过了，可以补执行
+        # 如果今天的执行时间存在且是今天
+        if today_run_time and today_run_time.date() == now.date():
+            # 检查当前时间是否已经超过了今天的执行时间
+            if now > today_run_time:
+                # 如果错过了今天的执行时间，都应该补执行（一天内有效）
+                time_diff = (now - today_run_time).total_seconds() / 60  # 转换为分钟
                 log.info(f"今天的执行时间是 {today_run_time.strftime('%H:%M:%S')}，当前时间 {now.strftime('%H:%M:%S')}，错过了 {time_diff:.1f} 分钟")
                 return True
+            else:
+                # 今天的执行时间还没到
+                time_remaining = (today_run_time - now).total_seconds() / 60
+                log.info(f"今天的执行时间 {today_run_time.strftime('%H:%M:%S')} 还有 {time_remaining:.1f} 分钟到达")
+                return False
+        else:
+            # 今天没有执行时间，等待下次
+            log.info("今天没有定时执行时间，等待下次执行")
+            return False
                 
     except Exception as e:
         log.warning(f"检查定时执行时间失败: {e}")
@@ -222,11 +222,22 @@ if __name__ == "__main__":
             
             trigger = CronTrigger.from_crontab(cron, timezone="Asia/Shanghai")
             now = datetime.datetime.now(tz=trigger.timezone)
-            next_run = trigger.get_next_fire_time(None, now)
-            if next_run:
-                log.info(f"智能启动检测：今天的定时执行时间尚未到达，下次执行时间：{next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # 先检查今天是否还有执行时间
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            today_run_time = trigger.get_next_fire_time(None, today_start)
+            
+            if today_run_time and today_run_time.date() == now.date() and now < today_run_time:
+                # 今天还有执行时间且尚未到达
+                time_remaining = (today_run_time - now).total_seconds() / 60
+                log.info(f"智能启动检测：今天的定时执行时间 {today_run_time.strftime('%H:%M:%S')} 还有 {time_remaining:.1f} 分钟到达")
             else:
-                log.info("智能启动检测：等待定时器执行。")
+                # 今天没有执行时间或已经过去，显示下次执行时间
+                next_run = trigger.get_next_fire_time(None, now)
+                if next_run:
+                    log.info(f"智能启动检测：下次执行时间：{next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+                else:
+                    log.info("智能启动检测：等待定时器执行。")
     elif smart_start:
         log.info("智能启动模式开启，但未配置CRON，立即执行任务。")
         should_run_now = True
