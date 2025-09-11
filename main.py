@@ -78,24 +78,6 @@ except Exception as e:
 async def main():
     messageList = []
     session = aiohttp.ClientSession(trust_env=True)
-    try:
-        log.warning("当前版本为: " + __VERSION__)
-        resp = await (
-            await session.get(
-                "http://version.fansmedalhelper.1961584514352337.cn-hangzhou.fc.devsapp.net/"
-            )
-        ).json()
-        if resp["version"] != __VERSION__:
-            log.warning("新版本为: " + resp["version"] + ",请更新")
-            log.warning("更新内容: " + resp["changelog"])
-            messageList.append(f"当前版本: {__VERSION__} ,最新版本: {resp['version']}")
-            messageList.append(f"更新内容: {resp['changelog']} ")
-        if resp["notice"]:
-            log.warning("公告: " + resp["notice"])
-            messageList.append(f"公告: {resp['notice']}")
-    except Exception as ex:
-        messageList.append(f"检查版本失败，{ex}")
-        log.warning(f"检查版本失败，{ex}")
     initTasks = []
     startTasks = []
     catchMsg = []
