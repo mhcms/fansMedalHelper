@@ -81,8 +81,11 @@ async def main():
     initTasks = []
     startTasks = []
     catchMsg = []
-    for user in users["USERS"]:
-        if user["access_key"]:
+    accounts = load_accounts()
+    if not accounts:
+        log.warning("tokens.json 中没有账号，请先扫码登录：python3 login.py")
+    for user in accounts:
+        if user.get("access_key"):
             biliUser = BiliUser(
                 user["access_key"],
                 user.get("white_uid", ""),
@@ -170,7 +173,25 @@ def should_run_immediately(cron_expression):
     return False
 
 
+def load_accounts():
+    """账号统一从 tokens.json 读取（每次运行重读，续期/新增账号免重启即时生效）"""
+    try:
+        from login import load_tokens
+
+        return list(load_tokens().values())
+    except Exception as e:
+        log.warning(f"读取 tokens.json 失败: {e}")
+        return []
+
+
 def run(*args, **kwargs):
+    # 跑任务前自动续期临近到期的 token（失败不影响主流程）
+    try:
+        from login import refresh_all
+
+        refresh_all(30, quiet=True)
+    except Exception as e:
+        log.warning(f"token 自动续期检查跳过: {e}")
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(main())

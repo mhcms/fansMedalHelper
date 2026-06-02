@@ -1,5 +1,6 @@
-aiohttp 
+aiohttp
 aiohttp_socks
-loguru 
-pyyaml 
+loguru
+pyyaml
 apscheduler
+qrcode
