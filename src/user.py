@@ -83,8 +83,9 @@ class BiliUser:
                 failedMedals = self.medals
 
             if self.config.get('LIKE_CHECK_LIGHT'):
-                failedMedals = [m for m in failedMedals if m['medal']['is_lighted'] != 1]
-                self.log.log("INFO", f"仅点赞未点亮的粉丝牌，共 {len(failedMedals)} 个")
+                before = len(failedMedals)
+                failedMedals = [m for m in failedMedals if not self._isLighted(m)]
+                self.log.log("INFO", f"仅点赞未点亮：共{before}个，已点亮{before - len(failedMedals)}个将跳过")
 
             if not self.config['ASYNC']:
                 self.log.log("INFO", "同步点赞任务开始....")
@@ -137,77 +138,62 @@ class BiliUser:
         
         total_medals = len(self.medals)
         filtered_medals_length = len(filtered_medals)
-        
-        if self.config['ASYNC']:
-            self.log.log("INFO", f"异步弹幕打卡任务开始....共{filtered_medals_length}个房间")
-            await self._sendDanmakuAsync(filtered_medals)
-        else:
-            self.log.log("INFO", f"同步弹幕打卡任务开始....预计 {filtered_medals_length * self.config['DANMAKU_CD'] * self.config['DANMAKU_NUM']} 秒完成")
-            await self._sendDanmakuSync(filtered_medals)
+
+        if self.config['DANMAKU_CHECK_LIGHT']:
+            lit = sum(1 for m in self.medals if self._isLighted(m))
+            self.log.log("INFO", f"仅未点亮发弹幕：共{total_medals}个，已点亮{lit}个将跳过")
+
+        # 弹幕受B站全局频控（每账号有最小发送间隔，与房间无关），无论同步/异步都必须串行发送
+        est = filtered_medals_length * self.config['DANMAKU_NUM'] * self.config['DANMAKU_CD']
+        self.log.log("INFO", f"弹幕打卡任务开始（串行发送，避免频率过快）....共{filtered_medals_length}个房间，预计 {est} 秒")
+        await self._sendDanmakuSerial(filtered_medals)
         
         if hasattr(self, 'initialMedal'):
             (await self.api.wearMedal(self.initialMedal['medal_id'])) if self.config['WEARMEDAL'] else ...
         self.log.log("SUCCESS", "弹幕打卡任务完成")
         self.message.append(f"【{self.name}】 弹幕打卡任务完成 {filtered_medals_length}/{total_medals}")
 
+    @staticmethod
+    def _isLighted(medal):
+        """该粉丝牌是否已点亮（is_lighted: 0未点亮 1已点亮，兼容 int/str 防止 "1"==1 判不出）"""
+        return str(medal['medal'].get('is_lighted', 0)) == '1'
+
     def _shouldSendDanmaku(self, medal):
         """判断是否应该发送弹幕"""
-        if self.config['DANMAKU_CHECK_LIGHT'] and medal['medal']['is_lighted'] == 1:
+        if self.config['DANMAKU_CHECK_LIGHT'] and self._isLighted(medal):
             return False
         # 注意：虽然新规则取消了20级限制，但此配置项保留用于向后兼容
         if not self.config['DANMAKU_CHECK_LEVEL'] and medal['medal']['level'] > 20:
             return False
         return True
 
-    async def _sendDanmakuSync(self, filtered_medals):
-        """同步弹幕发送"""
-        successnum = 0
+    async def _sendDanmakuSerial(self, filtered_medals):
+        """串行发送弹幕：B站对弹幕有全局频控（每账号有最小间隔），必须逐条发送并保持 CD"""
+        cd = self.config['DANMAKU_CD']
+        total = len(filtered_medals)
+        first = True
         for n, medal in enumerate(filtered_medals, 1):
             (await self.api.wearMedal(medal['medal']['medal_id'])) if self.config['WEARMEDAL'] else ...
-            
+            name = medal['anchor_info']['nick_name']
             for i in range(self.config['DANMAKU_NUM']):
-                try:
-                    danmaku = await self.api.sendDanmaku(medal['room_info']['room_id'])
-                    self.log.log(
-                        "INFO",
-                        f"{medal['anchor_info']['nick_name']} 房间弹幕打卡({i + 1}/{self.config['DANMAKU_NUM']})成功: {danmaku} ({n}/{len(filtered_medals)})",
-                    )
-                except Exception as e:
-                    self.log.log("ERROR", f"{medal['anchor_info']['nick_name']} 房间弹幕打卡({i + 1}/{self.config['DANMAKU_NUM']})失败: {e}")
-                    self.errmsg.append(f"【{self.name}】 {medal['anchor_info']['nick_name']} 房间弹幕打卡失败: {str(e)}")
-                finally:
-                    if i < self.config['DANMAKU_NUM'] - 1:  # 最后一次不需要等待
-                        await asyncio.sleep(self.config['DANMAKU_CD'])
-            successnum += 1
-
-    async def _sendDanmakuAsync(self, filtered_medals):
-        """异步弹幕发送"""
-        async def send_danmaku_for_medal(medal, medal_index):
-            (await self.api.wearMedal(medal['medal']['medal_id'])) if self.config['WEARMEDAL'] else ...
-            
-            success_count = 0
-            for i in range(self.config['DANMAKU_NUM']):
-                try:
-                    danmaku = await self.api.sendDanmaku(medal['room_info']['room_id'])
-                    success_count += 1
-                    self.log.log(
-                        "INFO",
-                        f"{medal['anchor_info']['nick_name']} 异步弹幕打卡({i + 1}/{self.config['DANMAKU_NUM']})成功: {danmaku} ({medal_index+1}/{len(filtered_medals)})",
-                    )
-                except Exception as e:
-                    self.log.log("ERROR", f"{medal['anchor_info']['nick_name']} 异步弹幕打卡({i + 1}/{self.config['DANMAKU_NUM']})失败: {e}")
-                    self.errmsg.append(f"【{self.name}】 {medal['anchor_info']['nick_name']} 异步弹幕打卡失败: {str(e)}")
-                
-                if i < self.config['DANMAKU_NUM'] - 1:  # 最后一次不需要等待
-                    await asyncio.sleep(self.config['DANMAKU_CD'])
-            return success_count > 0
-        
-        # 创建所有弹幕任务并并发执行
-        danmaku_tasks = [
-            send_danmaku_for_medal(medal, index)
-            for index, medal in enumerate(filtered_medals)
-        ]
-        await asyncio.gather(*danmaku_tasks)
+                if not first and cd > 0:
+                    await asyncio.sleep(cd)  # 每条弹幕之间（含跨房间）都留间隔
+                first = False
+                for attempt in range(2):  # 频率过快时多等一个 CD 重试一次
+                    try:
+                        danmaku = await self.api.sendDanmaku(medal['room_info']['room_id'])
+                        self.log.log(
+                            "INFO",
+                            f"{name} 房间弹幕打卡({i + 1}/{self.config['DANMAKU_NUM']})成功: {danmaku} ({n}/{total})",
+                        )
+                        break
+                    except Exception as e:
+                        if "频率过快" in str(e) and attempt == 0 and cd > 0:
+                            await asyncio.sleep(cd)
+                            continue
+                        self.log.log("ERROR", f"{name} 房间弹幕打卡({i + 1}/{self.config['DANMAKU_NUM']})失败: {e}")
+                        self.errmsg.append(f"【{self.name}】 {name} 房间弹幕打卡失败: {str(e)}")
+                        break
 
     async def init(self):
         if not await self.loginVerify():
