@@ -48,6 +48,7 @@ try:
         )
     assert users["ASYNC"] in [0, 1], "ASYNC参数错误"
     assert users["LIKE_CD"] >= 0, "LIKE_CD参数错误"
+    assert users.get("LIKE_CHECK_LIGHT", 0) in [0, 1], "LIKE_CHECK_LIGHT参数错误"
     # assert users['SHARE_CD'] >= 0, "SHARE_CD参数错误"
     assert users["DANMAKU_CD"] >= 0, "DANMAKU_CD参数错误"
     assert users["DANMAKU_NUM"] >= 0, "DANMAKU_NUM参数错误"
@@ -58,6 +59,7 @@ try:
     config = {
         "ASYNC": users["ASYNC"],
         "LIKE_CD": users["LIKE_CD"],
+        "LIKE_CHECK_LIGHT": users.get("LIKE_CHECK_LIGHT", 0),
         # "SHARE_CD": users['SHARE_CD'],
         "DANMAKU_CD": users["DANMAKU_CD"],
         "DANMAKU_NUM": users["DANMAKU_NUM"],

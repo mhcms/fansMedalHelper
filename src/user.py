@@ -81,7 +81,11 @@ class BiliUser:
         try:
             if not failedMedals:
                 failedMedals = self.medals
-            
+
+            if self.config.get('LIKE_CHECK_LIGHT'):
+                failedMedals = [m for m in failedMedals if m['medal']['is_lighted'] != 1]
+                self.log.log("INFO", f"仅点赞未点亮的粉丝牌，共 {len(failedMedals)} 个")
+
             if not self.config['ASYNC']:
                 self.log.log("INFO", "同步点赞任务开始....")
                 for index, medal in enumerate(failedMedals):
